@@ -21,7 +21,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "http://192.168.212.188:5173",  # 🔁 your frontend LAN IP
+        "http://192.168.212.188:5173",
+        "https://presenza-frontend.vercel.app",  # 🔁 your frontend LAN IP
     ],
     allow_credentials=True,
     allow_methods=["*"],

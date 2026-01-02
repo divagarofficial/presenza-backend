@@ -356,3 +356,67 @@ def export_absent_pdf(
             "Content-Disposition": f"attachment; filename=absent_{today}.pdf"
         },
     )
+
+# ===================== CR DASHBOARD =====================
+@router.get("/dashboard/summary")
+def cr_dashboard_summary(
+    db: Session = Depends(get_db),
+    cr=Depends(student_required),
+):
+    if not cr["is_cr"]:
+        raise HTTPException(status_code=403, detail="CR only")
+
+    cr_student = db.query(Student).filter(
+        Student.id == cr["student_id"]
+    ).first()
+
+    today = date.today()
+
+    total_students = (
+        db.query(Student)
+        .filter(
+            Student.year == cr_student.year,
+            Student.department == cr_student.department,
+            Student.section == cr_student.section,
+        )
+        .count()
+    )
+
+    marked = (
+        db.query(DailyAttendance)
+        .join(Student)
+        .filter(
+            DailyAttendance.date == today,
+            Student.year == cr_student.year,
+            Student.department == cr_student.department,
+            Student.section == cr_student.section,
+        )
+        .count()
+    )
+
+    last_scan = (
+        db.query(DailyAttendance.created_at)
+        .join(Student)
+        .filter(
+            DailyAttendance.date == today,
+            Student.year == cr_student.year,
+            Student.department == cr_student.department,
+            Student.section == cr_student.section,
+        )
+        .order_by(DailyAttendance.created_at.desc())
+        .first()
+    )
+
+    last_scan_time = (
+        to_ist(last_scan[0]).strftime("%I:%M %p") if last_scan else "—"
+    )
+
+    return {
+        "section": f"{cr_student.department} – {cr_student.year} {cr_student.section}",
+        "total_students": total_students,
+        "marked": marked,
+        "pending_od": 0,
+        "open_grievances": 0,
+        "last_scan": last_scan_time,
+    }
+

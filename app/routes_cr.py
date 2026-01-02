@@ -38,6 +38,68 @@ def to_ist(dt: datetime | None):
     if dt.tzinfo is None:
         dt = pytz.utc.localize(dt)
     return dt.astimezone(IST)
+def draw_watermark(c, width, height):
+    if os.path.exists(PRESENZA_LOGO):
+        c.saveState()
+        c.setFillAlpha(0.08)
+        c.drawImage(
+            PRESENZA_LOGO,
+            width / 2 - 6 * cm,
+            height / 2 - 6 * cm,
+            width=12 * cm,
+            height=12 * cm,
+            mask="auto",
+        )
+        c.restoreState()
+
+
+def draw_header(c, width, height, title, cr_student, today):
+    draw_watermark(c, width, height)
+
+    if os.path.exists(MINDURA_LOGO):
+        c.drawImage(
+            MINDURA_LOGO,
+            width / 2 - 1.5 * cm,
+            height - 3 * cm,
+            width=3 * cm,
+            height=3 * cm,
+            mask="auto",
+        )
+
+    c.setFont("Helvetica-Bold", 12)
+    c.drawCentredString(width / 2, height - 3.6 * cm, "MINDURA TECHNOLOGIES")
+
+    y = height - 5 * cm
+    c.setFont("Helvetica-Bold", 14)
+    c.drawCentredString(width / 2, y, title)
+
+    y -= 1 * cm
+    c.setFont("Helvetica", 10)
+    c.drawString(2 * cm, y, f"Department : {cr_student.department}")
+    y -= 0.5 * cm
+    c.drawString(2 * cm, y, f"Year / Section : {cr_student.year} {cr_student.section}")
+    y -= 0.5 * cm
+    c.drawString(2 * cm, y, f"Date : {today}")
+
+    return y - 1 * cm
+
+
+def draw_footer(c, width):
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(
+        width / 2,
+        2.6 * cm,
+        f"Report generated on : {datetime.now().strftime('%d-%m-%Y %I:%M %p')}",
+    )
+    c.setFont("Helvetica-Bold", 9)
+    c.drawCentredString(width / 2, 2.0 * cm, "MINDURA TECHNOLOGIES")
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(
+        width / 2,
+        1.4 * cm,
+        "© 2026 MINDURA TECHNOLOGIES. All rights reserved.",
+    )
+
 
 
 # ===================== SCAN =====================

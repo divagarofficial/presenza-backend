@@ -79,7 +79,7 @@ def draw_header(c, width, height, title, cr_student, today):
     y -= 0.5 * cm
     c.drawString(2 * cm, y, f"Year / Section : {cr_student.year} {cr_student.section}")
     y -= 0.5 * cm
-    c.drawString(2 * cm, y, f"Date : {today}")
+    c.drawString(2 * cm, y, f"Date : {today.strftime('%d-%m-%Y')}")
 
     return y - 1 * cm
 

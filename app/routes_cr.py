@@ -89,7 +89,7 @@ def draw_footer(c, width):
     c.drawCentredString(
         width / 2,
         2.6 * cm,
-        f"Report generated on : {datetime.now().strftime('%d-%m-%Y %I:%M %p')}",
+        f"Report generated on : {to_ist(datetime.now()).strftime('%d-%m-%Y %I:%M %p')}",
     )
     c.setFont("Helvetica-Bold", 9)
     c.drawCentredString(width / 2, 2.0 * cm, "MINDURA TECHNOLOGIES")

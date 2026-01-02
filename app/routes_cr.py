@@ -222,3 +222,160 @@ def cr_dashboard_summary(
         "open_grievances": 0,
         "last_scan": last_scan_time,
     }
+
+# ===================== PDF PRESENT =====================
+@router.get("/attendance/daily/export/present/pdf")
+def export_present_pdf(
+    cr=Depends(student_required),
+    db: Session = Depends(get_db),
+):
+    # 🔐 CR ONLY
+    if not cr["is_cr"]:
+        raise HTTPException(status_code=403, detail="CR only")
+
+    today = date.today()
+
+    # ✅ Fetch attendance with student join
+    records = (
+        db.query(DailyAttendance, Student)
+        .join(Student, DailyAttendance.student_id == Student.id)
+        .filter(
+            DailyAttendance.date == today,
+            Student.department == cr.department,
+            Student.year == cr.year,
+            Student.section == cr.section,
+        )
+        .order_by(DailyAttendance.created_at)
+        .all()
+    )
+
+    # ===== PDF SETUP =====
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    y = height - 2 * cm
+
+    # ===== HEADER =====
+    c.setFont("Helvetica-Bold", 14)
+    c.drawCentredString(width / 2, y, "DAILY ATTENDANCE REPORT")
+    y -= 1 * cm
+
+    c.setFont("Helvetica", 10)
+    c.drawString(2 * cm, y, f"Department : {cr['department']}")
+    y -= 0.5 * cm
+    c.drawString(2 * cm, y, f"Year / Section : {cr['year']} {cr['section']}")
+    y -= 0.5 * cm
+    c.drawString(2 * cm, y, f"Date : {today}")
+    y -= 1 * cm
+
+    # ===== TABLE HEADER =====
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(2 * cm, y, "Roll Number")
+    c.drawString(7 * cm, y, "Name")
+    c.drawString(14 * cm, y, "Time")
+    y -= 0.6 * cm
+
+    c.setFont("Helvetica", 10)
+
+    # ===== DATA ROWS =====
+    for attendance, student in records:
+        if y < 2 * cm:
+            c.showPage()
+            y = height - 2 * cm
+
+        c.drawString(2 * cm, y, student.roll_number)
+        c.drawString(7 * cm, y, student.name)
+        c.drawString(
+            14 * cm,
+            y,
+            attendance.created_at.strftime("%I:%M %p")
+            if attendance.created_at else "-"
+        )
+        y -= 0.4 * cm
+
+    # ===== FOOTER =====
+    c.setFont("Helvetica-Oblique", 9)
+    c.drawString(
+        2 * cm,
+        1.5 * cm,
+        f"Report generated at {datetime.now().strftime('%d-%m-%Y %I:%M %p')}",
+    )
+    c.drawRightString(
+        width - 2 * cm,
+        1.5 * cm,
+        "© 2026 MINDURA TECHNOLOGIES. All rights reserved."
+    )
+
+    c.save()
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=present_{today}.pdf"
+        },
+    )
+
+
+
+# ===================== PDF ABSENT =====================
+@router.get("/attendance/daily/export/absent/pdf")
+def export_absent_pdf(
+    db: Session = Depends(get_db),
+    cr=Depends(student_required),
+):
+    if not cr["is_cr"]:
+        raise HTTPException(status_code=403, detail="CR only")
+
+    today = date.today()
+    cr_student = db.query(Student).filter(Student.id == cr["student_id"]).first()
+
+    present_ids = (
+        db.query(DailyAttendance.student_id)
+        .filter(DailyAttendance.date == today)
+        .subquery()
+    )
+
+    students = (
+        db.query(Student)
+        .filter(
+            Student.department == cr_student.department,
+            Student.year == cr_student.year,
+            Student.section == cr_student.section,
+            ~Student.id.in_(present_ids),
+        )
+        .order_by(Student.roll_number)
+        .all()
+    )
+
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    y = draw_header(c, width, height, "ABSENTEE REPORT", cr_student, today)
+
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(2 * cm, y, "Roll Number")
+    c.drawString(7 * cm, y, "Name")
+    y -= 0.5 * cm
+    c.setFont("Helvetica", 10)
+
+    for s in students:
+        if y < 3 * cm:
+            c.showPage()
+            y = draw_header(c, width, height, "ABSENTEE REPORT", cr_student, today)
+
+        c.drawString(2 * cm, y, s.roll_number)
+        c.drawString(7 * cm, y, s.name)
+        y -= 0.4 * cm
+
+    draw_footer(c, width)
+    c.save()
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=absent_{today}.pdf"},
+    )

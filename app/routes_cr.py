@@ -99,7 +99,12 @@ def draw_footer(c, width):
         1.4 * cm,
         "© 2026 MINDURA TECHNOLOGIES. All rights reserved.",
     )
+# ===================== ASSETS =====================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 
+MINDURA_LOGO = os.path.join(ASSETS_DIR, "mindura_logo.png")
+PRESENZA_LOGO = os.path.join(ASSETS_DIR, "presenza_logo.png")
 
 
 # ===================== SCAN =====================

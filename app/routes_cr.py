@@ -174,7 +174,6 @@ def cr_manual_bulk_attendance(
             detail="No attendance records submitted"
         )
 
-    # Map roll_number -> status
     submitted = {
         r.roll_number: r.status.upper()
         for r in data.records
@@ -201,14 +200,12 @@ def cr_manual_bulk_attendance(
         if existing:
             existing.status = status
             existing.source = "CR_MANUAL"
-            existing.location_verified = False
         else:
             db.add(DailyAttendance(
                 student_id=student.id,
                 date=today,
                 status=status,
                 source="CR_MANUAL",
-                location_verified=False,
             ))
 
     db.commit()

@@ -201,13 +201,13 @@ def cr_manual_bulk_attendance(
 
         if existing:
             existing.status = status
-            existing.source = "CR_MANUAL"
+            existing.source = "CR MANUAL"
         else:
             db.add(DailyAttendance(
                 student_id=student.id,
                 date=today,
                 status=status,
-                source="CR_MANUAL",
+                source="CR MANUAL",
             ))
 
     db.commit()

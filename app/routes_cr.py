@@ -174,14 +174,12 @@ def cr_manual_bulk_attendance(
             detail="No attendance records submitted"
         )
 
+    # Map roll_number → status (ONLY PRESENT / OD)
     submitted = {
         r.roll_number: r.status.upper()
         for r in data.records
+        if r.status.upper() in ["PRESENT", "OD"]
     }
-
-    for status in submitted.values():
-        if status not in ["PRESENT", "OD"]:
-            raise HTTPException(status_code=400, detail="Invalid status")
 
     students = db.query(Student).filter(
         Student.department == cr_student.department,
@@ -190,7 +188,11 @@ def cr_manual_bulk_attendance(
     ).all()
 
     for student in students:
-        status = submitted.get(student.roll_number, "ABSENT")
+        # ❌ DO NOTHING for absentees
+        if student.roll_number not in submitted:
+            continue
+
+        status = submitted[student.roll_number]
 
         existing = db.query(DailyAttendance).filter(
             DailyAttendance.student_id == student.id,
@@ -214,7 +216,6 @@ def cr_manual_bulk_attendance(
         "message": "Manual attendance submitted successfully",
         "present": sum(1 for s in submitted.values() if s == "PRESENT"),
         "od": sum(1 for s in submitted.values() if s == "OD"),
-        "total": len(students),
     }
 
 # ===================== STUDENT LIST FOR MANUAL ATTENDANCE =====================

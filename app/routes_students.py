@@ -264,34 +264,34 @@ def student_daily_report(
     db: Session = Depends(get_db),
     student=Depends(student_required),
 ):
-    today = date.today()
-
-    # Total working days (distinct attendance dates)
+    # 1️⃣ TOTAL WORKING DAYS (GLOBAL – SAME AS BEFORE)
     total_days = (
         db.query(DailyAttendance.date)
         .distinct()
         .count()
     )
 
-    # Student present days
+    # 2️⃣ STUDENT PRESENT DAYS (FIXED STATUS CASE)
     present_days = (
         db.query(DailyAttendance)
         .filter(
             DailyAttendance.student_id == student["student_id"],
-            DailyAttendance.status == "Present",
+            DailyAttendance.status == "PRESENT",  # ✅ FIX
         )
         .count()
     )
+    # Absent days can be derived if needed
+    absent_days: int = max(total_days - present_days, 0)
 
-    absent_days = max(total_days - present_days, 0)
 
+    # 3️⃣ ATTENDANCE %
     percentage = (
         round((present_days / total_days) * 100)
         if total_days > 0
         else 0
     )
 
-    # Daily history
+    # 4️⃣ STUDENT HISTORY
     history = (
         db.query(DailyAttendance)
         .filter(DailyAttendance.student_id == student["student_id"])
@@ -302,7 +302,6 @@ def student_daily_report(
     return {
         "total_days": total_days,
         "present_days": present_days,
-        "absent_days": absent_days,
         "percentage": percentage,
         "daily_history": [
             {
@@ -313,6 +312,7 @@ def student_daily_report(
             for a in history
         ],
     }
+# --------------------------------------------------
 
 @router.get("/attendance/summary")
 def student_attendance_summary(

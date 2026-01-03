@@ -137,8 +137,8 @@ def mark_daily_attendance(
     attendance = DailyAttendance(
         student_id=student.id,
         date=date.today(),
-        status="Present",
-        source="CR_SCAN",
+        status="PRESENT",
+        source="CR SCAN",
         marked_by=cr["student_id"],
     )
 

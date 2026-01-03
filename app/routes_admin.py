@@ -334,7 +334,7 @@ def attendance_report(
     for s in students:
         present_days = db.query(DailyAttendance).filter(
             DailyAttendance.student_id == s.id,
-            DailyAttendance.status == "Present"
+            DailyAttendance.status == "PRESENT"
         ).count()
 
         percentage = (

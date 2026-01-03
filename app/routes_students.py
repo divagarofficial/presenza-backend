@@ -281,7 +281,7 @@ def student_daily_report(
         .count()
     )
     # Absent days can be derived if needed
-    absent_days: int = max(total_days - present_days, 0)
+    absent_days = max(total_days - present_days, 0)
 
 
     # 3️⃣ ATTENDANCE %
@@ -328,7 +328,7 @@ def student_attendance_summary(
         db.query(func.count(DailyAttendance.id))
         .filter(
             DailyAttendance.student_id == student["student_id"],
-            DailyAttendance.status == "Present"
+            DailyAttendance.status == "PRESENT"
         )
         .scalar()
     ) or 0

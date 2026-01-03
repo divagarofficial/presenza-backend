@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from enum import Enum
 from pydantic import BaseModel
 from datetime import date, time
+from typing import List, Optional
 
 
 
@@ -68,3 +69,10 @@ class SlotCreateSchema(BaseModel):
 
 class DailyAttendanceScanSchema(BaseModel):
     student_roll: str
+
+class CRManualAttendanceItem(BaseModel):
+    roll_number: str
+    status: str  # PRESENT or OD
+
+class CRManualAttendanceBulkSchema(BaseModel):
+    records: List[CRManualAttendanceItem]

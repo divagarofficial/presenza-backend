@@ -16,6 +16,8 @@ from app.database import SessionLocal
 from app.models import DailyAttendance, Student
 from app.dependencies import student_required
 from app.schemas import DailyAttendanceScanSchema
+from app.schemas import CRManualAttendanceBulkSchema
+
 
 router = APIRouter(prefix="/cr", tags=["Class Representative"])
 
@@ -144,6 +146,99 @@ def mark_daily_attendance(
     db.commit()
 
     return {"message": "Attendance marked successfully"}
+
+# ===================== MANUAL BULK ATTENDANCE =====================
+
+@router.post("/attendance/daily/manual/bulk")
+def cr_manual_bulk_attendance(
+    data: CRManualAttendanceBulkSchema,
+    db: Session = Depends(get_db),
+    cr=Depends(student_required),
+):
+    # 🔐 CR ONLY
+    if not cr["is_cr"]:
+        raise HTTPException(status_code=403, detail="CR only")
+
+    today = date.today()
+
+    # Fetch CR student record
+    cr_student = db.query(Student).filter(
+        Student.id == cr["student_id"]
+    ).first()
+
+    if not cr_student:
+        raise HTTPException(status_code=404, detail="CR student not found")
+
+    # Fetch all students of CR class
+    students = db.query(Student).filter(
+        Student.department == cr_student.department,
+        Student.year == cr_student.year,
+        Student.section == cr_student.section,
+    ).all()
+
+    if not students:
+        raise HTTPException(status_code=404, detail="No students found")
+
+    present_set = set(data.present_roll_numbers)
+
+    for student in students:
+        status = "PRESENT" if student.roll_number in present_set else "ABSENT"
+
+        existing = db.query(DailyAttendance).filter(
+            DailyAttendance.student_id == student.id,
+            DailyAttendance.date == today,
+        ).first()
+
+        if existing:
+            existing.status = status
+            existing.source = "CR_MANUAL"
+        else:
+            attendance = DailyAttendance(
+                student_id=student.id,
+                date=today,
+                status=status,
+                source="CR_MANUAL",
+            )
+            db.add(attendance)
+
+    db.commit()
+
+    return {
+        "message": "Manual attendance submitted successfully",
+        "date": today.strftime("%d-%m-%Y"),
+        "present_count": len(data.present_roll_numbers),
+        "total_students": len(students),
+    }
+# ===================== STUDENT LIST FOR MANUAL ATTENDANCE =====================
+
+@router.get("/attendance/daily/manual/students")
+def get_students_for_manual_attendance(
+    db: Session = Depends(get_db),
+    cr=Depends(student_required),
+):
+    if not cr["is_cr"]:
+        raise HTTPException(status_code=403, detail="CR only")
+
+    cr_student = db.query(Student).filter(
+        Student.id == cr["student_id"]
+    ).first()
+
+    students = db.query(Student).filter(
+        Student.department == cr_student.department,
+        Student.year == cr_student.year,
+        Student.section == cr_student.section,
+    ).order_by(Student.roll_number).all()
+
+    return {
+        "date": date.today().strftime("%d-%m-%Y"),
+        "students": [
+            {
+                "roll_number": s.roll_number,
+                "name": s.name
+            }
+            for s in students
+        ]
+    }
 
 
 # ===================== PRESENT LIST =====================

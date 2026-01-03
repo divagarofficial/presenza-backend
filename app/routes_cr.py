@@ -161,28 +161,37 @@ def cr_manual_bulk_attendance(
 
     today = date.today()
 
-    # Fetch CR student record
     cr_student = db.query(Student).filter(
         Student.id == cr["student_id"]
     ).first()
 
     if not cr_student:
-        raise HTTPException(status_code=404, detail="CR student not found")
+        raise HTTPException(status_code=404, detail="CR not found")
 
-    # Fetch all students of CR class
+    if not data.records:
+        raise HTTPException(
+            status_code=400,
+            detail="No attendance records submitted"
+        )
+
+    # Map roll_number -> status
+    submitted = {
+        r.roll_number: r.status.upper()
+        for r in data.records
+    }
+
+    for status in submitted.values():
+        if status not in ["PRESENT", "OD"]:
+            raise HTTPException(status_code=400, detail="Invalid status")
+
     students = db.query(Student).filter(
         Student.department == cr_student.department,
         Student.year == cr_student.year,
         Student.section == cr_student.section,
     ).all()
 
-    if not students:
-        raise HTTPException(status_code=404, detail="No students found")
-
-    present_set = set(data.present_roll_numbers)
-
     for student in students:
-        status = "PRESENT" if student.roll_number in present_set else "ABSENT"
+        status = submitted.get(student.roll_number, "ABSENT")
 
         existing = db.query(DailyAttendance).filter(
             DailyAttendance.student_id == student.id,
@@ -192,23 +201,25 @@ def cr_manual_bulk_attendance(
         if existing:
             existing.status = status
             existing.source = "CR_MANUAL"
+            existing.location_verified = False
         else:
-            attendance = DailyAttendance(
+            db.add(DailyAttendance(
                 student_id=student.id,
                 date=today,
                 status=status,
                 source="CR_MANUAL",
-            )
-            db.add(attendance)
+                location_verified=False,
+            ))
 
     db.commit()
 
     return {
         "message": "Manual attendance submitted successfully",
-        "date": today.strftime("%d-%m-%Y"),
-        "present_count": len(data.present_roll_numbers),
-        "total_students": len(students),
+        "present": sum(1 for s in submitted.values() if s == "PRESENT"),
+        "od": sum(1 for s in submitted.values() if s == "OD"),
+        "total": len(students),
     }
+
 # ===================== STUDENT LIST FOR MANUAL ATTENDANCE =====================
 
 @router.get("/attendance/daily/manual/students")

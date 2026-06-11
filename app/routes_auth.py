@@ -86,14 +86,21 @@ def student_login(
     data: StudentLoginSchema,
     db: Session = Depends(get_db)
 ):
-    student = db.query(Student).filter(
-        Student.roll_number == data.roll_number
-    ).first()
+    roll = (data.roll_number or "").strip()
+    mobile = (data.mobile or "").strip()
 
-    if not student or student.mobile != data.mobile:
+    student = db.query(Student).filter(Student.roll_number == roll).first()
+
+    if not student:
         raise HTTPException(
             status_code=401,
-            detail="Invalid student credentials"
+            detail="Invalid student credentials (no student with this roll number — register locally first)",
+        )
+
+    if (student.mobile or "").strip() != mobile:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid student credentials (mobile does not match the one used at registration)",
         )
 
     token = create_access_token({

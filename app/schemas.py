@@ -76,3 +76,83 @@ class CRManualAttendanceItem(BaseModel):
 
 class CRManualAttendanceBulkSchema(BaseModel):
     records: List[CRManualAttendanceItem]
+
+
+class CRAttendanceEditRecord(BaseModel):
+    roll_number: str
+    status: str  # PRESENT | OD | ABSENT
+
+
+class CRAttendanceEditBulkSchema(BaseModel):
+    date: date
+    records: List[CRAttendanceEditRecord]
+
+
+
+class GrievanceCreateSchema(BaseModel):
+    grievance_type: str
+    request_date: date
+    slot: Optional[str] = None
+    description: str
+
+
+class GrievanceDecisionSchema(BaseModel):
+    decision: str
+    remarks: Optional[str] = None
+
+
+# -------------------- Timetable module (Admin) --------------------
+class SubjectCreateSchema(BaseModel):
+    code: str
+    name: str
+
+
+class SubjectListItemSchema(BaseModel):
+    id: int
+    code: str
+    name: str
+
+
+class TimeSlotCreateSchema(BaseModel):
+    # Timetable uses TimeSlot.slot_name; DB stores start_time/end_time and admin_id
+    slot_name: str
+    start_time: time
+    end_time: time
+
+
+class TimeSlotListItemSchema(BaseModel):
+    id: int
+    slot_name: str
+    start_time: str
+    end_time: str
+
+
+class WeeklyTimetableCellSchema(BaseModel):
+    day: str  # Monday..Friday
+    slot_id: int
+    subject_id: Optional[int] = None
+
+
+class WeeklyTimetableUpsertSchema(BaseModel):
+    cells: List[WeeklyTimetableCellSchema]
+
+
+class WeeklyTimetableResponseSchema(BaseModel):
+    timetable: List[WeeklyTimetableCellSchema]
+
+
+# -------------------- CR Assignment (Admin) --------------------
+class CRAssignmentCurrentUpsertSchema(BaseModel):
+    current_cr_student_id: Optional[int] = None
+    valid_from: Optional[date] = None
+    valid_to: Optional[date] = None
+
+
+class CRAssignmentBackupUpsertSchema(BaseModel):
+    backup_cr_student_id: Optional[int] = None
+
+
+class CRAssignmentRemoveSchema(BaseModel):
+    pass
+
+

@@ -1,7 +1,10 @@
 # presenza-backend/app/main.py
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .database import engine
 from . import models
@@ -9,6 +12,9 @@ from .routes_auth import router as auth_router
 from .routes_admin import router as admin_router
 from .routes_students import router as students_router
 from .routes_cr import router as cr_router
+from .routes_notifications import router as notifications_router
+
+
 
 # Create DB tables
 models.Base.metadata.create_all(bind=engine)
@@ -38,8 +44,19 @@ app.add_middleware(
 # Routers
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(notifications_router)
+
+
+# IMPORTANT: some frontend routes are implemented as React routes; backend does not serve them.
+# Avoid adding placeholder HTML routes that can shadow /admin/* APIs.
+
 app.include_router(students_router)
 app.include_router(cr_router)
+
+
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 @app.get("/")
 def root():

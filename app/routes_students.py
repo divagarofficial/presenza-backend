@@ -1,26 +1,43 @@
 #presenza-backend/app/routes_students.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from jose import jwt
+from typing import Optional
 
 from .database import SessionLocal
-from .models import Student
+from .models import (
+    AbsenceRequest,
+    Admin,
+    Attendance,
+    DailyAttendance,
+    GrievanceRequest,
+    ODRequest,
+    QRSession,
+    Student,
+    Subject,
+    Timetable,
+    TimeSlot,
+)
 from .schemas import StudentRegisterSchema, StudentLoginSchema
 from .security import SECRET_KEY, ALGORITHM
-
-from datetime import date
-from .models import Attendance, QRSession, Student
 from .dependencies import student_required
 from app.utils.qr import validate_dynamic_qr
 from app.utils.attendance import auto_mark_daily_attendance
-from .models import DailyAttendance
-from datetime import date
 from sqlalchemy import func
 
+from .od_absence_history import (
+    get_student_od_history,
+    get_student_absence_history,
+)
 
+
+import os
+from datetime import date
+from fastapi import status
 
 router = APIRouter(prefix="/students", tags=["Students"])
+
 
 
 def get_db():
@@ -74,21 +91,24 @@ def student_login(
     data: StudentLoginSchema,
     db: Session = Depends(get_db)
 ):
-    student = db.query(Student).filter(
-        Student.roll_number == data.roll_number
-    ).first()
+    roll = (data.roll_number or "").strip()
+    mobile = (data.mobile or "").strip()
+
+    student = db.query(Student).filter(Student.roll_number == roll).first()
 
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    # Mobile number acts as password
-    if student.mobile != data.mobile:
+    if (student.mobile or "").strip() != mobile:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     payload = {
         "sub": student.roll_number,
         "role": "student",
-        "exp": datetime.utcnow() + timedelta(hours=6)
+        "student_id": student.id,
+        "roll_number": student.roll_number,
+        "is_cr": bool(student.is_cr),
+        "exp": datetime.utcnow() + timedelta(hours=6),
     }
 
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
@@ -140,14 +160,15 @@ def scan_qr(
 
     db.add(attendance)
     db.commit()
+    # auto marking based on slot attendance (if timetable is configured)
     auto_mark_daily_attendance(
-    db=db,
-    student_id=student.id,
-    admin_id=admin["admin_id"]
-)
-    
+        db=db,
+        student_id=student["student_id"],
+        admin_id=None,
+    )
 
     return {
+
         "message": "Attendance marked successfully",
         "subject": subject_code,
         "slot": slot_name
@@ -185,25 +206,480 @@ def get_today_attendance(
     ).first()
 
     if not record:
-        return {
-            "status": "Not Marked"
-        }
+        return {"status": "Not Marked"}
+
+    return {"status": record.status, "source": record.source}
+
+
+def _format_slot_status(raw: str | None) -> str:
+    if not raw:
+        return "Not Marked"
+    u = raw.upper()
+    if u == "PRESENT":
+        return "Present"
+    if u == "OD":
+        return "OD"
+    if u == "ABSENT":
+        return "Absent"
+    return raw
+
+
+def _today_summary_label(slots: list[dict], daily_status: str) -> str:
+    if not slots:
+        return daily_status if daily_status != "Not Marked" else "No timetable"
+    statuses = [s["status"] for s in slots]
+    if all(s == "Present" for s in statuses):
+        return "Present"
+    if all(s == "OD" for s in statuses):
+        return "OD"
+    if all(s == "Absent" for s in statuses):
+        return "Absent"
+    if all(s in ("Present", "OD") for s in statuses) and any(
+        s == "OD" for s in statuses
+    ):
+        return "In Progress"
+    if any(s == "Not Marked" for s in statuses):
+        return "In Progress"
+    return "In Progress"
+
+
+@router.get("/attendance/today/detail")
+def get_today_attendance_detail(
+    db: Session = Depends(get_db),
+    student=Depends(student_required),
+):
+    sid = student.get("student_id")
+    if not sid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired — please log in again",
+        )
+
+    stud = db.query(Student).filter(Student.id == sid).first()
+    if not stud:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    today = date.today()
+    daily_rec = (
+        db.query(DailyAttendance)
+        .filter(
+            DailyAttendance.student_id == sid,
+            DailyAttendance.date == today,
+        )
+        .first()
+    )
+    daily_status = "Not Marked"
+    daily_source = None
+    if daily_rec:
+        daily_status = daily_rec.status
+        daily_source = daily_rec.source
+
+    admin = (
+        db.query(Admin)
+        .filter(
+            Admin.department == stud.department,
+            Admin.year == stud.year,
+            Admin.section == stud.section,
+        )
+        .first()
+    )
+
+    slots_out: list[dict] = []
+    if admin:
+        weekday = today.strftime("%A")
+        rows = (
+            db.query(TimeSlot, Subject)
+            .join(Timetable, Timetable.slot_id == TimeSlot.id)
+            .join(Subject, Subject.id == Timetable.subject_id)
+            .filter(
+                Timetable.admin_id == admin.admin_id,
+                Timetable.day == weekday,
+            )
+            .order_by(TimeSlot.slot_name)
+            .all()
+        )
+        daily_is_od = bool(daily_rec and (daily_rec.status or "").upper() == "OD")
+        daily_is_absent = bool(
+            daily_rec and (daily_rec.status or "").strip().upper() == "ABSENT"
+        )
+        for ts, subject in rows:
+            att = (
+                db.query(Attendance)
+                .filter(
+                    Attendance.student_id == sid,
+                    Attendance.date == today,
+                    Attendance.slot == ts.id,
+                )
+                .first()
+            )
+            if att:
+                st = _format_slot_status(att.status)
+            elif daily_is_od:
+                st = "OD"
+            elif daily_is_absent:
+                st = "Absent"
+            else:
+                st = "Not Marked"
+            slots_out.append(
+                {
+                    "slot": ts.slot_name,
+                    "subject": subject.name,
+                    "status": st,
+                }
+            )
+
+    summary = _today_summary_label(slots_out, daily_status)
 
     return {
-        "status": record.status,
-        "source": record.source
+        "daily": {"status": daily_status, "source": daily_source},
+        "summary": summary,
+        "slots": slots_out,
     }
-# --------------------------------------------------
 
-def get_db():
-    db = SessionLocal()
+
+# --------------------------------------------------
+# OD APPLICATION (student)
+# --------------------------------------------------
+@router.post("/od/apply")
+def apply_od(
+    category: str = Form(...),
+    slots: str | None = Form(None),
+    reason: str = Form(...),
+    proof: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    student=Depends(student_required),
+):
+    if not student.get("student_id"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired — please log in again",
+        )
+
+    student_row = db.query(Student).filter(Student.id == student["student_id"]).first()
+
+    if not student_row:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    category = category.upper().strip()
+    if category not in ["FULL", "FULL_DAY", "SLOT"]:
+        raise HTTPException(status_code=400, detail="Invalid OD category")
+
+    normalized_category = "FULL_DAY" if category in ["FULL", "FULL_DAY"] else "SLOT"
+
+    if normalized_category == "SLOT":
+        if not slots or not slots.strip():
+            raise HTTPException(status_code=400, detail="slots is required for SLOT category")
+        slots_value = slots.strip()
+    else:
+        slots_value = None
+
+    # Save proof under backend static folder
+    proofs_dir = os.path.join(os.path.dirname(__file__), "static", "od_proofs")
+    os.makedirs(proofs_dir, exist_ok=True)
+
+    safe_name = proof.filename.replace("\\", "_").replace("/", "_")
+    file_ext = os.path.splitext(safe_name)[1].lower()
+    if file_ext not in [".pdf", ".png", ".jpg", ".jpeg", ".webp"]:
+        raise HTTPException(status_code=400, detail="Unsupported proof file type")
+
+    stored_name = f"od_{student_row.roll_number}_{int(datetime.utcnow().timestamp())}_{safe_name}"
+    stored_path = os.path.join(proofs_dir, stored_name)
+
+    content = proof.file.read()
+    with open(stored_path, "wb") as f:
+        f.write(content)
+
+    proof_url = f"/static/od_proofs/{stored_name}"
+
+    od = ODRequest(
+        student_id=student_row.id,
+        student_roll_number=student_row.roll_number,
+        student_name=student_row.name,
+        department=student_row.department,
+        year=student_row.year,
+        section=student_row.section,
+        request_date=date.today(),
+        category=normalized_category,
+        slots=slots_value,
+        reason=reason.strip(),
+        proof_url=proof_url,
+        proof_type=proof.content_type or file_ext,
+        status="PENDING",
+        cr_remarks=None,
+    )
+
+    db.add(od)
+    db.commit()
+    db.refresh(od)
+
+    return {
+        "message": "OD applied successfully",
+        "od_request_id": od.id,
+        "status": od.status,
+    }
+
+
+@router.post("/absent/declare")
+def declare_absent(
+    category: str = Form(...),
+    slots: str | None = Form(None),
+    reason: str = Form(...),
+    proof: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    student=Depends(student_required),
+):
+    if not student.get("student_id"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired — please log in again",
+        )
+
+    student_row = db.query(Student).filter(Student.id == student["student_id"]).first()
+    if not student_row:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    pending = (
+        db.query(AbsenceRequest)
+        .filter(
+            AbsenceRequest.student_id == student_row.id,
+            AbsenceRequest.request_date == date.today(),
+            AbsenceRequest.status == "PENDING",
+        )
+        .first()
+    )
+    if pending:
+        raise HTTPException(
+            status_code=400,
+            detail="You already have a pending absence request for today",
+        )
+
+    category = category.upper().strip()
+    if category not in ["FULL", "FULL_DAY", "SLOT"]:
+        raise HTTPException(status_code=400, detail="Invalid absence category")
+
+    normalized_category = "FULL_DAY" if category in ["FULL", "FULL_DAY"] else "SLOT"
+
+    if normalized_category == "SLOT":
+        if not slots or not slots.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="slots is required for SLOT category",
+            )
+        slots_value = slots.strip()
+    else:
+        slots_value = None
+
+    proof_url = None
+    proof_type = None
+    if proof is not None and getattr(proof, "filename", None) and str(proof.filename).strip():
+        proofs_dir = os.path.join(os.path.dirname(__file__), "static", "absence_proofs")
+        os.makedirs(proofs_dir, exist_ok=True)
+
+        safe_name = proof.filename.replace("\\", "_").replace("/", "_")
+        file_ext = os.path.splitext(safe_name)[1].lower()
+        if file_ext not in [".pdf", ".png", ".jpg", ".jpeg", ".webp"]:
+            raise HTTPException(status_code=400, detail="Unsupported proof file type")
+
+        stored_name = (
+            f"abs_{student_row.roll_number}_{int(datetime.utcnow().timestamp())}_{safe_name}"
+        )
+        stored_path = os.path.join(proofs_dir, stored_name)
+
+        content = proof.file.read()
+        with open(stored_path, "wb") as f:
+            f.write(content)
+
+        proof_url = f"/static/absence_proofs/{stored_name}"
+        proof_type = proof.content_type or file_ext
+
+    ab = AbsenceRequest(
+        student_id=student_row.id,
+        student_roll_number=student_row.roll_number,
+        student_name=student_row.name,
+        department=student_row.department,
+        year=student_row.year,
+        section=student_row.section,
+        request_date=date.today(),
+        category=normalized_category,
+        slots=slots_value,
+        reason=reason.strip(),
+        proof_url=proof_url,
+        proof_type=proof_type,
+        status="PENDING",
+        cr_remarks=None,
+    )
+
+    db.add(ab)
+    db.commit()
+    db.refresh(ab)
+
+    return {
+        "message": "Absence request submitted",
+        "absence_request_id": ab.id,
+        "status": ab.status,
+    }
+
+
+
+
+
+@router.get("/od/history")
+def get_my_od_history(
+    student=Depends(student_required),
+    db: Session = Depends(get_db),
+):
+    student_id = student["student_id"]
+    return {"requests": get_student_od_history(db, student_id)}
+
+
+@router.get("/absent/history")
+def get_my_absence_history(
+    student=Depends(student_required),
+    db: Session = Depends(get_db),
+):
+    student_id = student["student_id"]
+    return {"requests": get_student_absence_history(db, student_id)}
+
+
+@router.get("/grievances")
+def get_my_grievances(
+    student=Depends(student_required),
+    db: Session = Depends(get_db),
+):
+    student_id = student["student_id"]
+    grievances = (
+        db.query(GrievanceRequest)
+        .filter(GrievanceRequest.student_id == student_id)
+        .order_by(GrievanceRequest.created_at.desc())
+        .all()
+    )
+
+    def _display_status(value: str) -> str:
+        if not value:
+            return "Open"
+        normalized = value.upper().replace(" ", "_")
+        return {
+            "OPEN": "Open",
+            "UNDER_REVIEW": "Under Review",
+            "RESOLVED": "Resolved",
+            "REJECTED": "Rejected",
+        }.get(normalized, value.title())
+
+    return {
+        "requests": [
+            {
+                "id": g.id,
+                "request_date": str(g.request_date),
+                "grievance_type": g.grievance_type,
+                "slot": g.slot,
+                "description": g.description,
+                "proof_url": g.proof_url,
+                "status": _display_status(g.status),
+                "review_remarks": g.review_remarks,
+            }
+            for g in grievances
+        ]
+    }
+
+
+@router.post("/grievances")
+def submit_grievance(
+    grievance_type: str = Form(...),
+    request_date: date = Form(...),
+    slot: str | None = Form(None),
+    description: str = Form(...),
+    proof: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    student=Depends(student_required),
+):
+    if not student.get("student_id"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired — please log in again",
+        )
+
+    student_row = db.query(Student).filter(Student.id == student["student_id"]).first()
+    if not student_row:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    allowed_types = {"DAILY", "SLOT", "OD", "OTHER"}
+    normalized_type = grievance_type.strip().upper()
+    if normalized_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Invalid grievance type")
+
+    if normalized_type == "SLOT" and (not slot or not slot.strip()):
+        raise HTTPException(status_code=400, detail="Slot is required for slot grievances")
+
+    proofs_dir = os.path.join(os.path.dirname(__file__), "static", "grievance_proofs")
+    os.makedirs(proofs_dir, exist_ok=True)
+
+    safe_name = proof.filename.replace("\\", "_").replace("/", "_")
+    file_ext = os.path.splitext(safe_name)[1].lower()
+    if file_ext not in [".pdf", ".png", ".jpg", ".jpeg", ".webp"]:
+        raise HTTPException(status_code=400, detail="Unsupported proof file type")
+
+    stored_name = f"grievance_{student_row.roll_number}_{int(datetime.utcnow().timestamp())}_{safe_name}"
+    stored_path = os.path.join(proofs_dir, stored_name)
+
+    content = proof.file.read()
+    with open(stored_path, "wb") as f:
+        f.write(content)
+
+    proof_url = f"/static/grievance_proofs/{stored_name}"
+
+    grievance = GrievanceRequest(
+        student_id=student_row.id,
+        student_roll_number=student_row.roll_number,
+        student_name=student_row.name,
+        department=student_row.department,
+        year=student_row.year,
+        section=student_row.section,
+        request_date=request_date,
+        grievance_type=normalized_type,
+        slot=slot.strip() if slot else None,
+        description=description.strip(),
+        proof_url=proof_url,
+        proof_type=proof.content_type or file_ext,
+        status="OPEN",
+        review_remarks=None,
+    )
+
+    db.add(grievance)
+    db.commit()
+    db.refresh(grievance)
+
+    # Notification: inform admins of this student's section
     try:
-        yield db
-    finally:
-        db.close()
+        from app.notifications_utils import create_notification_for_admin
+
+        create_notification_for_admin(
+            db,
+            target_department=student_row.department,
+            target_year=student_row.year,
+            target_section=student_row.section,
+            message=f"A grievance was submitted for {student_row.roll_number}",
+            notification_type="GRIEVANCE_SUBMITTED",
+            meta={
+                "grievance_id": grievance.id,
+                "student_roll_number": student_row.roll_number,
+                "type": normalized_type,
+                "slot": slot,
+            },
+        )
+    except Exception:
+        pass
+
+    return {
+        "message": "Grievance submitted successfully",
+        "grievance_id": grievance.id,
+        "status": "Open",
+    }
+
 
 
 @router.get("/attendance/report")
+
+
 def student_attendance_report(
     student=Depends(student_required),
     db: Session = Depends(get_db),

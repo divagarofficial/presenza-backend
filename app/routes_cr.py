@@ -225,30 +225,37 @@ def mark_daily_attendance(
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
+    # Don't treat "already present/absent/od" as an error; return current state.
     existing = db.query(DailyAttendance).filter(
         DailyAttendance.student_id == student.id,
         DailyAttendance.date == date.today(),
     ).first()
 
+    if existing and (existing.status or "").upper() == "PRESENT":
+        return {"message": "Attendance already marked as Present"}
+
+    # Ensure CR scan only marks PRESENT for the day.
     if existing:
-        return {"message": "Attendance already marked"}
+        existing.status = "PRESENT"
+        existing.source = "CR SCAN"
+        existing.marked_by = cr["student_id"]
+    else:
+        existing = DailyAttendance(
+            student_id=student.id,
+            date=date.today(),
+            status="PRESENT",
+            source="CR SCAN",
+            marked_by=cr["student_id"],
+        )
+        db.add(existing)
 
-    attendance = DailyAttendance(
-        student_id=student.id,
-        date=date.today(),
-        status="PRESENT",
-        source="CR SCAN",
-        marked_by=cr["student_id"],
-    )
-
-    db.add(attendance)
     db.commit()
 
     try:
         create_notification_for_student(
             db,
             student_id=student.id,
-            message=f"Daily attendance marked: Present ({date.today().isoformat()})",
+            message=f"Daily attendance updated to Present ({date.today().isoformat()})",
             notification_type="ATTENDANCE_MARKED",
             meta={"date": date.today().isoformat(), "status": "Present", "source": "CR SCAN"},
         )
@@ -256,6 +263,7 @@ def mark_daily_attendance(
         pass
 
     return {"message": "Attendance marked successfully"}
+
 
 
 # ===================== MANUAL BULK ATTENDANCE =====================

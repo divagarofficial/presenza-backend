@@ -5,7 +5,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 from .database import SessionLocal
 from .models import Student, Admin
-from .auth import hash_password, verify_password, create_access_token
+from .auth import hash_password, verify_password, create_access_token, create_refresh_token
 from .schemas import (
     AdminRegisterSchema,
     AdminLoginSchema,
@@ -13,6 +13,7 @@ from .schemas import (
 )
 from fastapi.security import OAuth2PasswordRequestForm
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
 
 
 # -------------------- DB DEPENDENCY --------------------
@@ -73,16 +74,81 @@ def admin_login(
         "section": admin.section
     })
 
+    refresh_token = create_refresh_token({
+        "role": "admin",
+        "admin_id": admin.admin_id,
+        "department": admin.department,
+        "year": admin.year,
+        "section": admin.section
+    })
+
     return {
         "access_token": token,
+        "refresh_token": refresh_token,
         "token_type": "bearer"
     }
+
+
+
+# -------------------- REFRESH TOKEN --------------------
+from pydantic import BaseModel
+
+
+class RefreshTokenBody(BaseModel):
+    refresh_token: str
+
+
+@router.post("/refresh")
+def refresh_access_token(
+    body: RefreshTokenBody
+):
+    refresh_token = body.refresh_token
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="refresh_token is required")
+
+
+    try:
+        from jose import jwt
+        from .auth import create_access_token
+        from app.security import SECRET_KEY, ALGORITHM
+
+        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        token_type = payload.get("type")
+        if token_type != "refresh":
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+        role = payload.get("role")
+        if role == "admin":
+            access = create_access_token({
+                "role": "admin",
+                "admin_id": payload.get("admin_id"),
+                "department": payload.get("department"),
+                "year": payload.get("year"),
+                "section": payload.get("section"),
+            })
+        elif role == "student":
+            access = create_access_token({
+                "role": "student",
+                "student_id": payload.get("student_id"),
+                "roll_number": payload.get("roll_number"),
+                "is_cr": payload.get("is_cr", False),
+            })
+        else:
+            raise HTTPException(status_code=401, detail="Invalid refresh token role")
+
+        return {"access_token": access, "token_type": "bearer"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Refresh failed: {type(e).__name__}")
 
 
 
 # -------------------- STUDENT LOGIN --------------------
 @router.post("/student/login")
 def student_login(
+
     data: StudentLoginSchema,
     db: Session = Depends(get_db)
 ):
@@ -110,8 +176,17 @@ def student_login(
         "is_cr": student.is_cr
     })
 
+    refresh_token = create_refresh_token({
+        "role": "student",
+        "student_id": student.id,
+        "roll_number": student.roll_number,
+        "is_cr": student.is_cr
+    })
+
     return {
         "access_token": token,
+        "refresh_token": refresh_token,
         "token_type": "bearer"
     }
+
 

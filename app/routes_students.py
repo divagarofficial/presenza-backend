@@ -330,6 +330,18 @@ def get_today_attendance_detail(
 
     summary = _today_summary_label(slots_out, daily_status)
 
+    # Normalize status casing for frontend color logic
+    # Normalize status casing for frontend color logic
+    for s in slots_out:
+        st = (s.get("status") or "").strip().lower()
+        if st == "absent":
+            s["status"] = "Absent"  # frontend expects "Absent"
+        elif st == "present":
+            s["status"] = "Present"
+        elif st == "od":
+            s["status"] = "OD"
+
+
     return {
         "daily": {"status": daily_status, "source": daily_source},
         "summary": summary,
@@ -740,40 +752,46 @@ def student_daily_report(
     db: Session = Depends(get_db),
     student=Depends(student_required),
 ):
-    # 1️⃣ TOTAL WORKING DAYS (GLOBAL – SAME AS BEFORE)
+    # 1️⃣ TOTAL WORKING DAYS (GLOBAL – based on days where student has any daily record)
     total_days = (
         db.query(DailyAttendance.date)
+        .filter(DailyAttendance.student_id == student["student_id"])
         .distinct()
         .count()
     )
 
-    # 2️⃣ STUDENT PRESENT DAYS (FIXED STATUS CASE)
+    # 2️⃣ STUDENT PRESENT DAYS (ONLY PRESENT)
     present_days = (
         db.query(DailyAttendance)
         .filter(
             DailyAttendance.student_id == student["student_id"],
-            DailyAttendance.status == "PRESENT",  # ✅ FIX
+            DailyAttendance.status == "PRESENT",
         )
         .count()
     )
-    # Absent days can be derived if needed
-    absent_days = max(total_days - present_days, 0)
-
 
     # 3️⃣ ATTENDANCE %
     percentage = (
-        round((present_days / total_days) * 100)
-        if total_days > 0
-        else 0
+        round((present_days / total_days) * 100) if total_days > 0 else 0
     )
 
-    # 4️⃣ STUDENT HISTORY
+    # 4️⃣ STUDENT HISTORY (normalize casing to match frontend color logic)
     history = (
         db.query(DailyAttendance)
         .filter(DailyAttendance.student_id == student["student_id"])
         .order_by(DailyAttendance.date.desc())
         .all()
     )
+
+    def _display_status(raw: str | None) -> str:
+        if not raw:
+            return "Not Marked"
+        u = raw.strip().upper()
+        return {
+            "PRESENT": "Present",
+            "ABSENT": "Absent",
+            "OD": "OD",
+        }.get(u, raw)
 
     return {
         "total_days": total_days,
@@ -782,7 +800,7 @@ def student_daily_report(
         "daily_history": [
             {
                 "date": a.date.isoformat(),
-                "status": a.status,
+                "status": _display_status(a.status),
                 "source": a.source,
             }
             for a in history

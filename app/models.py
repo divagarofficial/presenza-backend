@@ -1,6 +1,7 @@
 #prazenza-backend/app/models.py
 from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, ForeignKey, Float, Time
 
+
 from sqlalchemy.sql import func
 from .database import Base
 from sqlalchemy.orm import relationship
@@ -214,8 +215,27 @@ class TimeSlot(Base):
     admin_id = Column(String, nullable=False)
 
 
+class HolidayDeclaration(Base):
+    __tablename__ = "holiday_declarations"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    department = Column(String, nullable=False, index=True)
+    year = Column(String, nullable=False, index=True)
+    section = Column(String, nullable=False, index=True)
+
+    holiday_date = Column(Date, nullable=False, index=True)
+
+    # optional reason
+    reason = Column(String, nullable=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+
 class Timetable(Base):
     __tablename__ = "timetable"
+
 
     id = Column(Integer, primary_key=True)
     day = Column(String, nullable=False)  # Monday..Friday

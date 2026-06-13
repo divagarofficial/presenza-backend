@@ -18,7 +18,9 @@ from .models import (
     Subject,
     Timetable,
     TimeSlot,
+    HolidayDeclaration,
 )
+
 from .schemas import StudentRegisterSchema, StudentLoginSchema
 from .security import SECRET_KEY, ALGORITHM
 from .dependencies import student_required
@@ -197,6 +199,7 @@ def get_my_profile(
 # --------------------------------------------------
 @router.get("/attendance/today")
 def get_today_attendance(
+
     db: Session = Depends(get_db),
     student=Depends(student_required)
 ):
@@ -245,6 +248,7 @@ def _today_summary_label(slots: list[dict], daily_status: str) -> str:
 
 @router.get("/attendance/today/detail")
 def get_today_attendance_detail(
+
     db: Session = Depends(get_db),
     student=Depends(student_required),
 ):
@@ -283,6 +287,41 @@ def get_today_attendance_detail(
         )
         .first()
     )
+
+    # ✅ Holiday logic
+    # HolidayDeclaration.holiday_date is the date until which the holiday applies (inclusive).
+    # For dates-only storage, that maps to: today <= holiday_date.
+    holiday_active = (
+        db.query(HolidayDeclaration)
+        .filter(
+            HolidayDeclaration.department == stud.department,
+            HolidayDeclaration.year == stud.year,
+            HolidayDeclaration.section == stud.section,
+            HolidayDeclaration.holiday_date >= today,
+        )
+        .order_by(HolidayDeclaration.holiday_date.desc())
+        .first()
+        is not None
+    )
+
+    holiday_reason = None
+    if holiday_active:
+        hrow = (
+            db.query(HolidayDeclaration)
+            .filter(
+                HolidayDeclaration.department == stud.department,
+                HolidayDeclaration.year == stud.year,
+                HolidayDeclaration.section == stud.section,
+                HolidayDeclaration.holiday_date >= today,
+            )
+            .order_by(HolidayDeclaration.holiday_date.desc())
+            .first()
+        )
+        holiday_reason = hrow.reason if hrow else None
+
+
+
+
 
     slots_out: list[dict] = []
     if admin:
@@ -328,10 +367,18 @@ def get_today_attendance_detail(
                 }
             )
 
+    # ✅ Holiday: override all slot statuses and daily status if a holiday is active for today.
+    if holiday_active:
+        daily_status = "Present"
+        daily_source = "HOLIDAY"
+        for s in slots_out:
+            s["status"] = "Present"
+
     summary = _today_summary_label(slots_out, daily_status)
 
     # Normalize status casing for frontend color logic
     # Normalize status casing for frontend color logic
+
     for s in slots_out:
         st = (s.get("status") or "").strip().lower()
         if st == "absent":

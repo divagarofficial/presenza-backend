@@ -17,7 +17,9 @@ from app.models import (
     Subject,
     TimeSlot,
     CRAssignment,
+    HolidayDeclaration,
 )
+
 
 from app.schemas import (
     StudentRegisterSchema,
@@ -30,7 +32,9 @@ from app.schemas import (
     CRAssignmentCurrentUpsertSchema,
     CRAssignmentBackupUpsertSchema,
     CRAssignmentRemoveSchema,
+    HolidayDeclareSchema,
 )
+
 
 from app.dependencies import admin_required
 from app.utils.qr import generate_dynamic_qr, cleanup_old_qr
@@ -832,4 +836,32 @@ def admin_get_weekly_timetable(db: Session = Depends(get_db), admin=Depends(admi
             }
         )
     return {"timetable": out}
+
+
+# ===================== HOLIDAY DECLARATION (Admin) =====================
+@router.post("/attendance/holiday/declare")
+def declare_holiday(
+    data: HolidayDeclareSchema,
+    db: Session = Depends(get_db),
+    admin=Depends(admin_required),
+):
+    # Save as section-scoped announcement; students will interpret from today up to holiday_date.
+    hd = HolidayDeclaration(
+        department=admin["department"],
+        year=admin["year"],
+        section=admin["section"],
+        holiday_date=data.holiday_date,
+        reason=(data.reason.strip() if data.reason else None),
+    )
+
+    db.add(hd)
+    db.commit()
+    db.refresh(hd)
+
+    return {
+        "message": "Holiday declared successfully",
+        "holiday_date": hd.holiday_date.isoformat(),
+        "reason": hd.reason,
+    }
+
 

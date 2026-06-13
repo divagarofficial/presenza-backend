@@ -1,15 +1,12 @@
-#prazenza-backend/app/schemas.py
 from pydantic import BaseModel
 from enum import Enum
-from pydantic import BaseModel
 from datetime import date, time
 from typing import List, Optional
 
 
 
-
-
 class DepartmentEnum(str, Enum):
+
     CSE = "BE COMPUTER SCIENCE AND ENGINEERING"
     AI_DS = "BTECH ARTIFICIAL INTELLIGENCE AND DATA SCIENCE"
     AIML = "BE COMPUTER SCIENCE AND ENGINEERING (AI&ML)"
@@ -44,6 +41,7 @@ class StudentLoginSchema(BaseModel):
     roll_number: str
     mobile: str
 
+
 class StudentRegisterSchema(BaseModel):
     roll_number: str
     name: str
@@ -52,6 +50,7 @@ class StudentRegisterSchema(BaseModel):
     section: str
     mobile: str
     is_cr: bool = False
+
 
 class SemesterCreateSchema(BaseModel):
     start_date: date
@@ -62,17 +61,21 @@ class SemesterResponseSchema(BaseModel):
     start_date: date
     end_date: date
 
+
 class SlotCreateSchema(BaseModel):
     slot_number: int
     start_time: time
     end_time: time
 
+
 class DailyAttendanceScanSchema(BaseModel):
     student_roll: str
+
 
 class CRManualAttendanceItem(BaseModel):
     roll_number: str
     status: str  # PRESENT or OD
+
 
 class CRManualAttendanceBulkSchema(BaseModel):
     records: List[CRManualAttendanceItem]
@@ -88,7 +91,6 @@ class CRAttendanceEditBulkSchema(BaseModel):
     records: List[CRAttendanceEditRecord]
 
 
-
 class GrievanceCreateSchema(BaseModel):
     grievance_type: str
     request_date: date
@@ -99,6 +101,12 @@ class GrievanceCreateSchema(BaseModel):
 class GrievanceDecisionSchema(BaseModel):
     decision: str
     remarks: Optional[str] = None
+
+
+class HolidayDeclareSchema(BaseModel):
+    holiday_date: date
+    reason: Optional[str] = None
+
 
 
 # -------------------- Timetable module (Admin) --------------------

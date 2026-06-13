@@ -11,6 +11,10 @@ from . import models
 from .routes_auth import router as auth_router
 from .routes_admin import router as admin_router
 from .routes_students import router as students_router
+from .routes_student_holiday_announcements import router as student_holiday_router
+from .routes_student_home_announcement import router as student_home_announcement_router
+
+
 from .routes_cr import router as cr_router
 from .routes_notifications import router as notifications_router
 
@@ -52,6 +56,11 @@ app.include_router(notifications_router)
 
 app.include_router(students_router)
 app.include_router(cr_router)
+app.include_router(student_holiday_router)
+app.include_router(student_home_announcement_router)
+
+
+
 
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
